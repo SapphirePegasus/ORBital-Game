@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "orbital-game",
+    "slug": "orbital",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#05060F",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#05060F"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sapphirepegasus.orbital"
+    },
+    "android": {
+      "package": "com.sapphirepegasus.orbital",
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#05060F"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "plugins": [
+      "expo-splash-screen",
+      "expo-audio"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "faa40a41-48f9-4e82-a5dc-8249e3c64443"
+      }
+    },
+    "owner": "sapphirepegasus"
+  }
+}

@@ -1,123 +1,88 @@
-# Orbital — React Native Space Game
+# Space Hopper
 
-A minimalist orbital-mechanics mobile game. Pilot a rocket between planets using real gravity, orbital capture, and launch timing.
+A minimal, majestic orbital-hopping game for **React Native + Expo SDK 56**
+(React Native 0.85, React 19.2, New Architecture).
 
----
+Hold to charge. Release to fly. Gravity does the rest.
 
-## Quick start
+- Rocket orbits a body; **hold** anywhere to charge launch speed (live,
+  honest trajectory preview), **release** to launch tangentially.
+- Get captured by the next body's gravity — planet to planet, like a monkey
+  through trees. Collect coins, bank them, upgrade the rocket.
+- Every body has real derived physics: `mass = density × r²`, inverse-square
+  gravity, escape velocity `√(2GM/d)` shown live on the HUD.
+- Hazards: asteroid belts, solar flares, gas-giant atmospheric drag, dead
+  planets, black holes (event horizons are non-negotiable), supernovas on a
+  fuse. Orbit too long → decay. Aim badly → lost in the dark.
+- Seamless transitions: one persistent Skia canvas; menu / play / pause /
+  death / retry are crossfaded overlays. No navigator. No loading screens.
 
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Prebuild native layer (required for Skia + MMKV + Reanimated)
-npx expo prebuild
-
-# 3. Run on device/simulator
-npx expo run:ios     # or run:android
-```
-
-> **Do not use Expo Go** — this app uses native modules (Skia, MMKV, Reanimated worklets) that require a custom dev client.
-
----
-
-## Project structure
-
-```
-src/
-├── types/          Single source of truth — all TS types
-├── constants/      Physics tuning, colors, timing
-├── utils/
-│   ├── vec2.ts     Allocation-minimal vector math
-│   └── rng.ts      Seeded PRNG for world gen
-├── engine/
-│   ├── physics.ts  RK4 integrator, gravity, orbits, collisions
-│   └── worldGen.ts Procedural galaxy / system / planet generation
-├── store/
-│   └── gameStore.ts Zustand store — game phase, score, upgrades, persistence
-├── audio/
-│   └── AudioManager.ts expo-av music + SFX with crossfade
-├── game/
-│   ├── GameCanvas.tsx  Skia canvas + Reanimated physics loop
-│   ├── GestureHandler.tsx  Touch zones: hold-to-charge, steer L/R
-│   └── HUD.tsx         Score, speed, orbit decay, charge bar
-└── screens/
-    ├── MenuScreen.tsx  Animated main menu
-    ├── GameScreen.tsx  Orchestrates all game layers
-    ├── PauseOverlay.tsx Frosted pause menu
-    └── FailScreen.tsx  Game over with reason + retry
-```
-
----
-
-## Architecture decisions
-
-### Why no game engine?
-React Native Skia + Reanimated gives us a 60fps GPU-accelerated canvas with physics running on the UI thread via worklets — no bridge crossings per frame. No Unity/Pixi overhead, stays in the React Native ecosystem.
-
-### Physics: RK4 integrator
-The Runge-Kutta 4th order integrator in `engine/physics.ts` handles multiple gravitational bodies simultaneously. It's numerically stable at variable frame rates and runs at a fixed 60Hz timestep with accumulator-based catching-up.
-
-### Gravity model
-```
-F = G * M * m / r²
-```
-Each planet has a unique `mass` and `radius`. Black holes have 50× base mass and an event horizon radius for instant-kill collision. Gas giants have high mass (800–3000) for strong pull; dead planets have low mass (30–120) for weak, treacherous orbits.
-
-### Screen transitions
-All screens coexist in a single view tree — no Navigator push/pop. `phase` in Zustand drives opacity/scale animations. Menu → Game is a radial fade (350ms). Pause is a blur overlay (200ms). Fail is a shake + dissolve (300ms).
-
-### Controls
-- **Left 30% of screen**: steer left during orbit
-- **Center 40%**: hold to charge, release to launch
-- **Right 30%**: steer right during orbit
-- **Double-tap**: pause / resume
-
-### Audio
-`AudioManager` maintains two concurrent `expo-av` Sound objects for music crossfading. SFX are pooled on first load. Adaptive music switches tracks based on hazard proximity (calm → tense → danger).
-
----
-
-## Adding assets
-
-See `src/assets/ASSETS.md` for the full list of audio + image files needed.
-
-For the MVP, all game objects are rendered as Skia vector paths — no sprites required. Audio placeholders can be silent `.mp3` files during dev.
-
----
-
-## Running tests
+## Run it
 
 ```bash
-npm test
+npm install          # or: npx expo install --fix  (aligns to your SDK patch)
+npm run typecheck    # tsc --noEmit
+npm test             # jest-expo: physics, worldgen, engine, persistence
+npm start            # Expo dev server → press a / i or scan with Expo Go
 ```
 
-Tests cover: physics formulas, orbit mechanics, collision detection, world generation determinism.
+Audio is pre-generated. To re-synthesize (or after editing the generator):
+`npm run generate-audio`. Drop your own WAVs into `assets/audio/` to reskin.
 
----
+## Where everything lives
 
-## Tuning the feel
+```
+App.tsx                    boot, phase wiring, overlay composition
+src/config/                ⚙ ALL gameplay tunables — start here to tune feel
+  gameConfig.ts            gravity G, launch speeds, capture rules, decay,
+                           hazards, camera, scoring, world pacing…
+  bodies.ts                per-archetype physics (density, size, rewards)
+  upgrades.ts              upgrade definitions + cost curves
+  palette.ts               the entire look
+src/core/                  math, seeded RNG, shared types (pure TS)
+src/engine/                physics.ts · world.ts · engine.ts (pure TS, tested)
+src/state/                 store.ts (useSyncExternalStore) · gameStore ·
+                           progressStore · persistence (validated + checksummed)
+src/render/                renderer.ts (immediate-mode Skia) · GameCanvas.tsx
+src/ui/                    HUD + menu/pause/gameover/upgrades overlays
+src/audio/                 expo-audio manager (expo-av is deprecated in SDK 56)
+docs/decisions/            ADRs: rendering loop, state, physics model
+__tests__/                 engine-layer unit tests
+scripts/generate-audio.mjs deterministic WAV synthesis (license-clean)
+```
 
-All physics constants live in `src/constants/index.ts`:
+## Tuning cheatsheet
 
-| Constant | Effect |
+| Feel change | Knob |
 |---|---|
-| `G` | Overall gravity strength |
-| `LAUNCH_VELOCITY_SCALE` | How fast the rocket launches at full charge |
-| `ORBIT_CAPTURE_RADIUS_MULTIPLIER` | How close you need to be to enter orbit |
-| `BASE_ORBIT_DECAY_RATE` | How quickly orbit decays per revolution |
-| `MAX_ORBITS_BEFORE_CRASH` | Hard cap on orbit loops |
-| `TRAJECTORY_STEPS` | Preview dot count (performance vs accuracy) |
+| Heavier universe | `physics.G` |
+| Easier captures | `capture.speedFactor` ↑, archetype `captureFactor` ↑ |
+| Finer launch control | `launch.chargeTime` ↑ |
+| Longer safe orbits | archetype `decayTime`, `decay.shrinkRate` ↓ |
+| Bigger jumps | `world.gapMin/gapMax` |
+| More danger | `world.beltChance`, hazard `minDepth` ↓ |
+| Faster difficulty ramp | `world.difficultyPerGalaxy` |
 
----
+## Engineering posture
 
-## Next steps (post-MVP)
+- **Fixed-timestep simulation** (ADR-003): identical feel at 60/120 Hz,
+  hitch-proof accumulator, no tunneling.
+- **Zero React work in the hot path** (ADR-001): one `SkPicture` per frame;
+  HUD mirrors at 8 Hz.
+- **Dependencies**: only Expo-bundled, first-party packages (Expo, Shopify
+  Skia, Software Mansion, RN community AsyncStorage) at the exact versions
+  pinned by the SDK 56 release — no long-tail community packages (ADR-002).
+- **Persistence hardening**: versioned envelope, full structural validation,
+  range clamping, FNV-1a corruption check, storage failures degrade to
+  defaults. Honest limit: on-device saves can never be truly tamper-proof
+  without a server; there is no PII, no network I/O, no remote code, no
+  dynamic evaluation anywhere in the app.
+- **Resilience**: audio/haptics failures are swallowed (never crash
+  gameplay); backgrounding auto-pauses the run and flushes saves.
+- **Determinism**: seeded worldgen — a run is reproducible from its seed.
 
-- [ ] Skia planet rendering (atmosphere glow, surface detail paths)
-- [ ] Rocket sprite + flame particle system
-- [ ] Upgrade shop screen between runs
-- [ ] Galaxy map screen (zoomed-out solar systems)
-- [ ] Supernova / solar flare animated hazards
-- [ ] Haptic feedback on launch / collect / death
-- [ ] Leaderboard (Expo + Supabase or Game Center)
-- [ ] Procedural background music via Tone.js or custom generator
+## Roadmap hooks (intentionally out of scope for v1)
+
+- Daily-seed challenge (worldgen is already seed-deterministic).
+- Cosmetic rocket skins (renderer paths are centralized).
+- Cloud save / leaderboards (would finally justify server-side save signing).

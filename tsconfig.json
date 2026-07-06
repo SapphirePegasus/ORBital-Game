@@ -3,27 +3,23 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": false,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
     "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
-    "types": ["jest"],
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": false,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@engine/*": ["src/engine/*"],
-      "@store/*": ["src/store/*"],
-      "@screens/*": ["src/screens/*"],
-      "@game/*": ["src/game/*"],
-      "@audio/*": ["src/audio/*"],
-      "@types/*": ["src/types/*"],
-      "@constants": ["src/constants/index.ts"],
-      "@utils/*": ["src/utils/*"]
-    }
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    "types": [
+      "jest"
+    ]
   },
-  "include": ["src", "__tests__", "app.config.ts"],
-  "exclude": ["node_modules", ".expo"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "scripts"
+  ]
 }
