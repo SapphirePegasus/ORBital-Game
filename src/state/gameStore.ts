@@ -6,10 +6,16 @@
 import type { DeathCause, GamePhase } from '../core/types';
 import { createStore } from './store';
 
+export type TutorialHint = 'hold' | 'release' | 'steer' | null;
+
 export interface GameState {
   phase: GamePhase;
   /** Which overlay panel is open on top of menu/gameOver (upgrades shop). */
   shopOpen: boolean;
+  /** Customize (cosmetics) overlay open on top of menu/gameOver. */
+  customizeOpen: boolean;
+  /** Contextual first-run hint currently shown on the HUD. */
+  hint: TutorialHint;
   score: number;
   runCoins: number;
   depth: number;
@@ -20,6 +26,8 @@ export interface GameState {
 export const gameStore = createStore<GameState>({
   phase: 'menu',
   shopOpen: false,
+  customizeOpen: false,
+  hint: null,
   score: 0,
   runCoins: 0,
   depth: 0,
@@ -32,6 +40,7 @@ export const gameActions = {
     gameStore.set({
       phase: 'playing',
       shopOpen: false,
+      customizeOpen: false,
       score: 0,
       runCoins: 0,
       depth: 0,
@@ -49,10 +58,16 @@ export const gameActions = {
     gameStore.set({ phase: 'gameOver', deathCause: cause, isNewBest });
   },
   toMenu(): void {
-    gameStore.set({ phase: 'menu', shopOpen: false });
+    gameStore.set({ phase: 'menu', shopOpen: false, customizeOpen: false });
   },
   setShopOpen(open: boolean): void {
-    gameStore.set({ shopOpen: open });
+    gameStore.set({ shopOpen: open, customizeOpen: false });
+  },
+  setCustomizeOpen(open: boolean): void {
+    gameStore.set({ customizeOpen: open, shopOpen: false });
+  },
+  setHint(hint: TutorialHint): void {
+    gameStore.set({ hint });
   },
   syncRunStats(score: number, runCoins: number, depth: number): void {
     gameStore.set({ score, runCoins, depth });

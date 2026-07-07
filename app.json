@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "orbital-game",
+    "name": "ORBital",
     "slug": "orbital",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -15,7 +15,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.sapphirepegasus.orbital"
+      "bundleIdentifier": "com.sapphirepegasus.orbital",
+      "buildNumber": "3"
     },
     "android": {
       "package": "com.sapphirepegasus.orbital",
@@ -24,22 +25,18 @@
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#05060F"
       },
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ]
+      "versionCode": 3
     },
     "plugins": [
       "expo-splash-screen",
-      "expo-audio"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "faa40a41-48f9-4e82-a5dc-8249e3c64443"
-      }
-    },
-    "owner": "sapphirepegasus"
+      "expo-audio",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "disableAutoUpload": true
+        }
+      ]
+    ]
   }
 }

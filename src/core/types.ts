@@ -104,8 +104,8 @@ export interface RocketState {
   chargeT: number;
   /** Seconds spent in the current flight (drives lost-in-space timeout). */
   flightTime: number;
-  /** Mid-flight boosts remaining this hop. */
-  boostsLeft: number;
+  /** Active steering input while flying: -1 left, 0 none, 1 right. */
+  steer: -1 | 0 | 1;
   /** Shield charges remaining this run. */
   shields: number;
 }
@@ -113,9 +113,9 @@ export interface RocketState {
 /** Engine → app events, consumed once per frame. */
 export type EngineEvent =
   | { type: 'launched'; speed: number }
-  | { type: 'boost' }
+  | { type: 'steer' }
   | { type: 'captured'; body: CelestialBody; coins: number }
-  | { type: 'coin' }
+  | { type: 'coin'; x: number; y: number }
   | { type: 'shieldHit' }
   | { type: 'flareWarning' }
   | { type: 'novaArmed' }

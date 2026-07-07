@@ -21,8 +21,8 @@ export const upgradeDefs: readonly UpgradeDef[] = [
   },
   {
     id: 'boosters',
-    name: 'Boosters',
-    description: '+1 mid-flight boost per hop. Tap while flying to burn.',
+    name: 'Thrusters',
+    description: 'Stronger steering thrusters — sharper mid-flight turns.',
     maxLevel: 3,
     baseCost: 40,
     costGrowth: 2.2,

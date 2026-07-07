@@ -8,6 +8,11 @@
  * drains its events, and records the scene into an SkPicture stored in a
  * Reanimated shared value. React never re-renders per frame; the HUD mirrors
  * stats at gameConfig.ui.hudHz instead.
+ *
+ * Input contract (one Pan gesture, role decided at press time):
+ *  - Parked (orbiting): press = charge, release = launch. Unchanged.
+ *  - Flying: press-and-hold on the LEFT half = steer left, RIGHT half =
+ *    steer right; sliding across the midline switches sides; release stops.
  */
 import {
   Canvas,
@@ -26,8 +31,11 @@ import { palette } from '../config/palette';
 import { smoothDamp, clamp } from '../core/math';
 import { GameEngine, type HudInfo } from '../engine/engine';
 import { gameActions, gameStore } from '../state/gameStore';
-import { progressActions, progressStore } from '../state/progressStore';
-import { renderScene, type Camera, type Effect } from './renderer';
+import { featureEnabled, progressActions, progressStore } from '../state/progressStore';
+import { computeFitZoom, type FitTarget } from './camera';
+import { ParticleSystem, Trail } from './particles';
+import { breadcrumb } from '../observability/errorReporter';
+import { applyCosmetics, renderScene, type Camera, type Effect, type Popup } from './renderer';
 
 export interface GameCanvasHandle {
   startRun: () => void;
@@ -38,6 +46,9 @@ interface Props {
   handleRef: React.MutableRefObject<GameCanvasHandle | null>;
 }
 
+/** Reused per-frame scratch array for camera fit targets (no per-frame alloc). */
+const fitTargets: FitTarget[] = [];
+
 export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
   const { width, height } = useWindowDimensions();
   const picture = useSharedValue<SkPicture>(createPicture(() => undefined));
@@ -46,6 +57,14 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
   if (!engineRef.current) engineRef.current = new GameEngine();
   const camRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const effectsRef = useRef<Effect[]>([]);
+  const popupsRef = useRef<Popup[]>([]);
+  const particlesRef = useRef(new ParticleSystem());
+  const trailRef = useRef(new Trail());
+  const shakeRef = useRef({ amp: 0, t: 0 });
+  /** Role of the current press: charging launch vs steering. */
+  const pressRoleRef = useRef<'charge' | 'steer' | null>(null);
+  /** Tutorial progress within the current run (hold seen → release seen…). */
+  const tutorialStageRef = useRef<'hold' | 'release' | 'steer' | 'done'>('done');
 
   // ---------------------------------------------------------------- helpers
 
@@ -58,6 +77,23 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
     effectsRef.current.push({ ...e, age: 0 });
   }, []);
 
+  const spawnPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    popupsRef.current.push({ x, y, text, color, age: 0, life: gameConfig.popups.life });
+  }, []);
+
+  const shake = useCallback((amp: number) => {
+    if (!featureEnabled('screenShake')) return;
+    const s = shakeRef.current;
+    s.amp = Math.max(s.amp, amp);
+    s.t = 0;
+  }, []);
+
+  const advanceTutorial = useCallback((stage: 'hold' | 'release' | 'steer' | 'done') => {
+    tutorialStageRef.current = stage;
+    gameActions.setHint(stage === 'done' ? null : stage);
+    if (stage === 'done') progressActions.markTutorialDone();
+  }, []);
+
   /** Route engine events to audio / haptics / stores / visual effects. */
   const processEvents = useCallback(() => {
     const engine = engineRef.current;
@@ -67,13 +103,18 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
         case 'launched':
           audioManager.play('launch');
           haptic(Haptics.ImpactFeedbackStyle.Light);
+          trailRef.current.clear();
+          if (tutorialStageRef.current === 'release') {
+            advanceTutorial(featureEnabled('steering') ? 'steer' : 'done');
+          } else if (tutorialStageRef.current === 'steer') gameActions.setHint('steer');
           break;
-        case 'boost':
+        case 'steer':
           audioManager.play('boost');
-          haptic(Haptics.ImpactFeedbackStyle.Medium);
+          if (tutorialStageRef.current === 'steer') advanceTutorial('done');
           break;
         case 'coin':
           audioManager.play('coin');
+          spawnPopup(ev.x, ev.y, '+1', palette.accent); // plain ASCII: Skia matchFont glyph coverage is narrower than RN text
           break;
         case 'captured':
           audioManager.play('capture');
@@ -86,10 +127,25 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
             color: palette.accent,
             maxRadius: ev.body.radius * 2.2,
           });
+          if (ev.coins > 0) {
+            spawnPopup(
+              ev.body.x,
+              ev.body.y - ev.body.radius - 18,
+              `+${gameConfig.scoring.perBody + (gameConfig.scoring.riskBonus[ev.body.kind] ?? 0)}`,
+              palette.text,
+            );
+          }
+          // Ending a hop with the tutorial's steer hint still up is fine —
+          // it re-appears on the next flight until steering is used once.
+          if (tutorialStageRef.current === 'steer') gameActions.setHint(null);
           break;
         case 'shieldHit':
           audioManager.play('warning');
           haptic(Haptics.ImpactFeedbackStyle.Heavy);
+          shake(gameConfig.shake.shield);
+          if (featureEnabled('particles')) {
+            particlesRef.current.burst(engine.rocket.x, engine.rocket.y, 2);
+          }
           spawnEffect({
             kind: 'ring',
             x: engine.rocket.x,
@@ -103,10 +159,15 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
         case 'novaArmed':
           audioManager.play('warning');
           haptic(Haptics.ImpactFeedbackStyle.Medium);
+          shake(gameConfig.shake.nova);
           break;
         case 'died': {
           audioManager.play('explosion');
           haptic(Haptics.ImpactFeedbackStyle.Heavy);
+          shake(gameConfig.shake.death);
+          if (featureEnabled('particles')) {
+            particlesRef.current.burst(engine.rocket.x, engine.rocket.y, 1);
+          }
           spawnEffect({
             kind: 'burst',
             x: engine.rocket.x,
@@ -114,6 +175,12 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
             life: 0.9,
             color: palette.danger,
             maxRadius: 90,
+          });
+          gameActions.setHint(null);
+          breadcrumb('run-ended', {
+            cause: ev.cause,
+            score: engine.score,
+            depth: engine.bodiesVisited,
           });
           const isNewBest = progressActions.bankRun(
             engine.score,
@@ -126,7 +193,7 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
         }
       }
     }
-  }, [haptic, spawnEffect]);
+  }, [haptic, spawnEffect, spawnPopup, shake, advanceTutorial]);
 
   // ------------------------------------------------------------------- loop
 
@@ -143,7 +210,6 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
       last = now;
 
       const phase = gameStore.get().phase;
-
       if (phase === 'paused') return; // frozen frame — cheapest pause there is
 
       if (phase === 'playing' || phase === 'menu') {
@@ -152,28 +218,88 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
         processEvents();
       }
 
-      // Effects age even during game-over so the final explosion completes.
+      const r = engine.rocket;
+
+      // Visual-only systems (age even during game-over so bursts complete).
       const effects = effectsRef.current;
       for (const e of effects) e.age += dt;
       effectsRef.current = effects.filter((e) => e.age < e.life);
+      const popups = popupsRef.current;
+      for (const p of popups) p.age += dt;
+      popupsRef.current = popups.filter((p) => p.age < p.life);
 
-      // Camera: follow the rocket; ease zoom out with speed for readability.
+      const particles = particlesRef.current;
+      const trail = trailRef.current;
+      if (engine.alive && !engine.attract) {
+        const back = r.heading + Math.PI;
+        const emitParticles = featureEnabled('particles'); // one read per frame
+        if (r.mode === 'flying') {
+          trail.sample(dt, r.x, r.y); // trail is a core visual — never gated
+          if (emitParticles) {
+            particles.emit(dt, gameConfig.particles.exhaustRate, r.x, r.y, back, 0.55);
+            if (r.steer !== 0) {
+              particles.emit(
+                dt,
+                gameConfig.particles.steerRate,
+                r.x,
+                r.y,
+                back - r.steer * 1.2,
+                0.5,
+              );
+            }
+          }
+        } else if (r.mode === 'charging' && emitParticles) {
+          particles.emit(
+            dt,
+            gameConfig.particles.chargeRate * (0.4 + r.chargeT),
+            r.x,
+            r.y,
+            back,
+            0.7,
+          );
+        }
+      }
+      particles.update(dt);
+      trail.update(dt);
+
+      // Screen shake: decaying dual-axis oscillation.
+      const s = shakeRef.current;
+      let shakeX = 0;
+      let shakeY = 0;
+      if (s.amp > 0.1) {
+        s.t += dt;
+        const decay = Math.exp(-gameConfig.shake.decayRate * s.t);
+        const f = gameConfig.shake.frequency;
+        shakeX = Math.sin(s.t * f) * s.amp * decay;
+        shakeY = Math.cos(s.t * f * 1.3) * s.amp * decay;
+        if (decay < 0.02) s.amp = 0;
+      }
+
+      // Camera: follow the rocket…
       const cam = camRef.current;
-      const r = engine.rocket;
       const rate = gameConfig.camera.followRate;
       cam.x = smoothDamp(cam.x, r.x, rate, dt);
       cam.y = smoothDamp(cam.y, r.y, rate, dt);
-      const speed = Math.hypot(r.vx, r.vy);
-      const targetZoom =
-        r.mode === 'flying'
-          ? clamp(
-              gameConfig.camera.zoomMax -
-                (speed / gameConfig.launch.maxSpeed) *
-                  (gameConfig.camera.zoomMax - gameConfig.camera.zoomMin),
-              gameConfig.camera.zoomMin,
-              gameConfig.camera.zoomMax,
-            )
-          : gameConfig.camera.zoomMax;
+
+      // …and zoom-to-fit so the current AND next body are always visible —
+      // the player must never lose the sense of direction.
+      fitTargets.length = 0;
+      const current = r.bodyId >= 0 ? engine.world.byId(r.bodyId) : undefined;
+      if (current) {
+        fitTargets.push({ x: current.x, y: current.y, r: current.captureRadius });
+      }
+      const next = engine.world.bodies.find((b) => b.depth === engine.bodiesVisited + 1);
+      if (next) fitTargets.push({ x: next.x, y: next.y, r: next.captureRadius });
+      const targetZoom = computeFitZoom(fitTargets, {
+        focusX: cam.x,
+        focusY: cam.y,
+        viewportW: width,
+        viewportH: height,
+        anchorY: gameConfig.camera.anchorY,
+        marginPx: gameConfig.camera.fitMarginPx,
+        minZoom: gameConfig.camera.minZoom,
+        maxZoom: gameConfig.camera.maxZoom,
+      });
       cam.zoom = smoothDamp(cam.zoom, targetZoom, gameConfig.camera.zoomRate, dt);
 
       // HUD mirror at low frequency — keeps React work off the hot path.
@@ -190,6 +316,12 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
           width,
           height,
           effects: effectsRef.current,
+          popups: popupsRef.current,
+          particles,
+          trail,
+          shakeX,
+          shakeY,
+          quality: progressStore.get().graphicsQuality,
         });
       });
     };
@@ -197,6 +329,16 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
   }, [width, height, picture, processEvents]);
+
+  // ---------------------------------------------------- equipped cosmetics
+  useEffect(() => {
+    const apply = (): void => {
+      const eq = progressStore.get().equipped;
+      applyCosmetics(eq.skin, eq.scheme, eq.trail);
+    };
+    apply();
+    return progressStore.subscribe(apply);
+  }, []);
 
   // ------------------------------------------------------------ public API
 
@@ -208,8 +350,19 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
         engine.reset(progressStore.get().upgrades);
         engine.attract = false;
         effectsRef.current = [];
+        popupsRef.current = [];
+        particlesRef.current.clear();
+        trailRef.current.clear();
+        shakeRef.current = { amp: 0, t: 0 };
+        pressRoleRef.current = null;
         camRef.current = { x: engine.rocket.x, y: engine.rocket.y, zoom: 1 };
         gameActions.startRun();
+        if (!progressStore.get().tutorialDone && featureEnabled('tutorialHints')) {
+          tutorialStageRef.current = 'hold';
+          gameActions.setHint('hold');
+        } else {
+          tutorialStageRef.current = 'done';
+        }
       },
       getHud: () => engineRef.current?.hudInfo() ?? null,
     };
@@ -220,8 +373,40 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
 
   // ---------------------------------------------------------------- input
 
-  const press = useCallback(() => engineRef.current?.press(), []);
-  const release = useCallback(() => engineRef.current?.release(), []);
+  const sideForX = useCallback((x: number): -1 | 1 => (x < width / 2 ? -1 : 1), [width]);
+
+  const onPress = useCallback(
+    (x: number) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      if (engine.rocket.mode === 'flying') {
+        if (!featureEnabled('steering')) return; // feature off: inert press
+        pressRoleRef.current = 'steer';
+        engine.setSteer(sideForX(x));
+      } else {
+        pressRoleRef.current = 'charge';
+        engine.press();
+        if (tutorialStageRef.current === 'hold') advanceTutorial('release');
+      }
+    },
+    [sideForX, advanceTutorial],
+  );
+
+  const onMove = useCallback(
+    (x: number) => {
+      // Sliding across the midline while steering switches thrusters.
+      if (pressRoleRef.current === 'steer') engineRef.current?.setSteer(sideForX(x));
+    },
+    [sideForX],
+  );
+
+  const onRelease = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (pressRoleRef.current === 'steer') engine.setSteer(0);
+    else engine.release();
+    pressRoleRef.current = null;
+  }, []);
 
   const gesture = useMemo(
     () =>
@@ -229,15 +414,19 @@ export const GameCanvas: React.FC<Props> = ({ handleRef }) => {
         .minDistance(0)
         .maxPointers(1)
         .shouldCancelWhenOutside(false)
-        .onBegin(() => {
+        .onBegin((e) => {
           'worklet';
-          runOnJS(press)();
+          runOnJS(onPress)(e.x);
+        })
+        .onUpdate((e) => {
+          'worklet';
+          runOnJS(onMove)(e.x);
         })
         .onFinalize(() => {
           'worklet';
-          runOnJS(release)();
+          runOnJS(onRelease)();
         }),
-    [press, release],
+    [onPress, onMove, onRelease],
   );
 
   return (

@@ -56,8 +56,13 @@ export const gameConfig = {
     minDriftSpeed: 18,
     /** Corridor half-width around the run axis; beyond it = lost in space. */
     corridorHalfWidth: 900,
-    /** Boost impulse (added along current velocity direction). */
-    boostImpulse: 95,
+  },
+
+  steering: {
+    /** Lateral thruster acceleration while holding a screen half (units/s²). */
+    baseTurnAccel: 150,
+    /** Boosters upgrade: turn authority multiplier is 1 + level × this. */
+    turnAccelPerLevel: 0.3,
   },
 
   world: {
@@ -107,17 +112,21 @@ export const gameConfig = {
     followRate: 4.2,
     /** Vertical screen anchor for the rocket (0 = top, 1 = bottom). */
     anchorY: 0.62,
-    /** Zoom-out while flying fast, for readability. */
-    zoomMin: 0.82,
-    zoomMax: 1.0,
+    /**
+     * Zoom-to-fit: the camera zooms out so the current body AND the next
+     * unvisited body are always on screen (the player must never lose the
+     * sense of direction), clamped to [minZoom, maxZoom].
+     */
+    fitMarginPx: 70,
+    minZoom: 0.4,
+    maxZoom: 1.0,
     zoomRate: 2.5,
   },
 
   rocket: {
     /** Collision radius. */
     radius: 9,
-    /** Base boosts per hop / shields per run before upgrades. */
-    baseBoosts: 0,
+    /** Base shields per run before upgrades. */
     baseShields: 0,
   },
 
@@ -129,6 +138,42 @@ export const gameConfig = {
     ],
     /** Virtual tile size the starfield wraps within. */
     tile: 1024,
+  },
+
+  trail: {
+    /** Flight-trail ring buffer: number of samples and seconds between them. */
+    points: 48,
+    interval: 0.035,
+    maxAge: 1.6,
+  },
+
+  particles: {
+    poolSize: 128,
+    /** Exhaust emission (particles/s) while flying / charging. */
+    exhaustRate: 42,
+    chargeRate: 24,
+    /** Extra side-thruster emission while steering. */
+    steerRate: 30,
+    life: { min: 0.25, max: 0.6 },
+    speed: { min: 26, max: 70 },
+    burstCount: 26,
+    burstSpeed: { min: 60, max: 210 },
+    burstLife: { min: 0.4, max: 0.9 },
+  },
+
+  shake: {
+    death: 14,
+    shield: 8,
+    nova: 10,
+    /** Amplitude decay half-life-ish rate (per second). */
+    decayRate: 6,
+    frequency: 34,
+  },
+
+  popups: {
+    life: 1.0,
+    riseDistance: 42,
+    fontSize: 15,
   },
 
   ui: {

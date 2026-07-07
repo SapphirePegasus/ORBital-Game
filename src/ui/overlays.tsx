@@ -3,16 +3,67 @@
  * the world keeps breathing behind the menu (attract mode), which is what
  * gives the game its calm, seamless feel.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { audioManager } from '../audio/audioManager';
 import { palette } from '../config/palette';
+import { featureDefs } from '../config/features';
 import { upgradeCost, upgradeDefs } from '../config/upgrades';
 import { deathMessages, gameActions, gameStore } from '../state/gameStore';
 import { progressActions, progressStore } from '../state/progressStore';
 import { useStore } from '../state/store';
 import { FadeView, MinimalButton, StatChip } from './components';
+
+/** Slow breathing opacity — the classic "press start" pulse. */
+const PulseText: React.FC<{ style?: object; children: React.ReactNode }> = ({
+  style,
+  children,
+}) => {
+  const t = useSharedValue(1);
+  useEffect(() => {
+    t.value = withRepeat(
+      withSequence(
+        withTiming(0.35, { duration: 1100, easing: Easing.inOut(Easing.sin) }),
+        withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.sin) }),
+      ),
+      -1,
+    );
+  }, [t]);
+  const animated = useAnimatedStyle(() => ({ opacity: t.value }));
+  return (
+    <Animated.Text style={[style, animated]}>{children}</Animated.Text>
+  );
+};
+
+/** Brief scale pop whenever `trigger` changes — purchase/score feedback. */
+const PopOnChange: React.FC<{ trigger: number; children: React.ReactNode }> = ({
+  trigger,
+  children,
+}) => {
+  const s = useSharedValue(1);
+  const first = React.useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    s.value = withSequence(
+      withTiming(1.18, { duration: 110, easing: Easing.out(Easing.quad) }),
+      withTiming(1, { duration: 170, easing: Easing.out(Easing.quad) }),
+    );
+  }, [trigger, s]);
+  const animated = useAnimatedStyle(() => ({ transform: [{ scale: s.value }] }));
+  return <Animated.View style={animated}>{children}</Animated.View>;
+};
 
 // ------------------------------------------------------------------- Menu
 
@@ -22,6 +73,7 @@ export const MenuOverlay: React.FC<{ visible: boolean; onStart: () => void }> = 
 }) => {
   const insets = useSafeAreaInsets();
   const bestScore = useStore(progressStore, (s) => s.bestScore);
+  const features = useStore(progressStore, (s) => s.features);
   const coins = useStore(progressStore, (s) => s.coins);
 
   return (
@@ -33,26 +85,44 @@ export const MenuOverlay: React.FC<{ visible: boolean; onStart: () => void }> = 
         accessibilityLabel="Tap to start"
       >
         <View style={styles.menuTop}>
-          <Text style={styles.title}>SPACE{'\n'}HOPPER</Text>
+          <Text style={styles.title}>ORBITAL</Text>
           <Text style={styles.subtitle}>hold to charge · release to fly</Text>
         </View>
         <View style={styles.menuBottom}>
-          <Text style={styles.tapToStart}>tap to start</Text>
-          <View style={styles.menuStats}>
+          <PulseText style={styles.tapToStart}>tap to start</PulseText>
+          <View style={styles.statCard}>
             <StatChip label="Best" value={`${bestScore}`} />
+            <View style={styles.statDivider} />
             <StatChip label="Coins" value={`◈ ${coins}`} />
           </View>
-          <Pressable
-            onPress={(e) => {
-              e.stopPropagation();
-              audioManager.play('ui');
-              gameActions.setShopOpen(true);
-            }}
-            accessibilityRole="button"
-            hitSlop={10}
-          >
-            <Text style={styles.link}>hangar · upgrades</Text>
-          </Pressable>
+          <View style={styles.linkRow}>
+            {features.customize && (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  audioManager.play('ui');
+                  gameActions.setCustomizeOpen(true);
+                }}
+                accessibilityRole="button"
+                hitSlop={10}
+              >
+                <Text style={styles.link}>customize</Text>
+              </Pressable>
+            )}
+            {features.upgrades && (
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  audioManager.play('ui');
+                  gameActions.setShopOpen(true);
+                }}
+                accessibilityRole="button"
+                hitSlop={10}
+              >
+                <Text style={styles.link}>upgrades</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
       </Pressable>
     </FadeView>
@@ -68,6 +138,8 @@ export const PauseOverlay: React.FC<{ visible: boolean; onQuit: () => void }> = 
   const music = useStore(progressStore, (s) => s.musicEnabled);
   const sfx = useStore(progressStore, (s) => s.sfxEnabled);
   const haptics = useStore(progressStore, (s) => s.hapticsEnabled);
+  const quality = useStore(progressStore, (s) => s.graphicsQuality);
+  const features = useStore(progressStore, (s) => s.features);
 
   return (
     <FadeView visible={visible} style={styles.scrim}>
@@ -75,26 +147,49 @@ export const PauseOverlay: React.FC<{ visible: boolean; onQuit: () => void }> = 
         <Text style={styles.heading}>PAUSED</Text>
         <MinimalButton label="Resume" primary onPress={gameActions.resume} />
         <MinimalButton label="Abandon Run" onPress={onQuit} />
-        <View style={styles.settings}>
+        <ScrollView
+          style={styles.settingsScroll}
+          contentContainerStyle={styles.settings}
+          showsVerticalScrollIndicator={false}
+        >
           <SettingRow label="Music" value={music} onToggle={() => {
             progressActions.toggleSetting('musicEnabled');
             audioManager.applyMusicSetting();
           }} />
           <SettingRow label="Sound" value={sfx} onToggle={() => progressActions.toggleSetting('sfxEnabled')} />
           <SettingRow label="Haptics" value={haptics} onToggle={() => progressActions.toggleSetting('hapticsEnabled')} />
-        </View>
+          <SettingRow
+            label="HD Graphics"
+            value={quality === 'high'}
+            onToggle={() => progressActions.setGraphicsQuality(quality === 'high' ? 'low' : 'high')}
+          />
+          <Text style={styles.settingsGroup}>FEATURES</Text>
+          {featureDefs.map((def) => (
+            <SettingRow
+              key={def.id}
+              label={def.name}
+              hint={def.hint}
+              value={features[def.id]}
+              onToggle={() => progressActions.toggleFeature(def.id)}
+            />
+          ))}
+        </ScrollView>
       </View>
     </FadeView>
   );
 };
 
-const SettingRow: React.FC<{ label: string; value: boolean; onToggle: () => void }> = ({
-  label,
-  value,
-  onToggle,
-}) => (
+const SettingRow: React.FC<{
+  label: string;
+  value: boolean;
+  onToggle: () => void;
+  hint?: string;
+}> = ({ label, value, onToggle, hint }) => (
   <View style={styles.settingRow}>
-    <Text style={styles.settingLabel}>{label}</Text>
+    <View style={styles.settingLabelBox}>
+      <Text style={styles.settingLabel}>{label}</Text>
+      {hint !== undefined && <Text style={styles.settingHint}>{hint}</Text>}
+    </View>
     <Switch
       value={value}
       onValueChange={onToggle}
@@ -116,6 +211,7 @@ export const GameOverOverlay: React.FC<{
   const depth = useStore(gameStore, (s) => s.depth);
   const cause = useStore(gameStore, (s) => s.deathCause);
   const isNewBest = useStore(gameStore, (s) => s.isNewBest);
+  const features = useStore(progressStore, (s) => s.features);
 
   return (
     <FadeView visible={visible} style={styles.scrim}>
@@ -130,7 +226,12 @@ export const GameOverOverlay: React.FC<{
         </View>
         <View style={{ height: 26 }} />
         <MinimalButton label="Retry" primary onPress={onRetry} />
-        <MinimalButton label="Upgrades" onPress={() => gameActions.setShopOpen(true)} />
+        {features.upgrades && (
+          <MinimalButton label="Upgrades" onPress={() => gameActions.setShopOpen(true)} />
+        )}
+        {features.customize && (
+          <MinimalButton label="Customize" onPress={() => gameActions.setCustomizeOpen(true)} />
+        )}
         <MinimalButton label="Menu" onPress={onMenu} />
       </View>
     </FadeView>
@@ -139,16 +240,27 @@ export const GameOverOverlay: React.FC<{
 
 // ----------------------------------------------------------------- Upgrades
 
+const upgradeGlyphs: Record<string, string> = {
+  chargeControl: '⌖',
+  boosters: '▲',
+  shield: '⬡',
+  stabilizers: '◌',
+  magnet: '◈',
+};
+
 export const UpgradesOverlay: React.FC<{ visible: boolean }> = ({ visible }) => {
+  const enabled = useStore(progressStore, (s) => s.features.upgrades);
   const insets = useSafeAreaInsets();
   const coins = useStore(progressStore, (s) => s.coins);
   const upgrades = useStore(progressStore, (s) => s.upgrades);
 
   return (
-    <FadeView visible={visible} style={styles.scrim}>
+    <FadeView visible={visible && enabled} style={styles.scrim}>
       <View style={[styles.fill, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 16 }]}>
         <Text style={styles.heading}>HANGAR</Text>
-        <Text style={styles.walletText}>◈ {coins}</Text>
+        <PopOnChange trigger={coins}>
+          <Text style={styles.walletText}>◈ {coins}</Text>
+        </PopOnChange>
         <ScrollView contentContainerStyle={styles.shopList} showsVerticalScrollIndicator={false}>
           {upgradeDefs.map((def) => {
             const level = upgrades[def.id];
@@ -157,6 +269,7 @@ export const UpgradesOverlay: React.FC<{ visible: boolean }> = ({ visible }) => 
             const affordable = !maxed && coins >= cost;
             return (
               <View key={def.id} style={styles.shopRow}>
+                <Text style={styles.shopGlyph}>{upgradeGlyphs[def.id] ?? '·'}</Text>
                 <View style={styles.shopInfo}>
                   <Text style={styles.shopName}>{def.name}</Text>
                   <Text style={styles.shopDesc}>{def.description}</Text>
@@ -201,22 +314,60 @@ const styles = StyleSheet.create({
     letterSpacing: 14,
     textAlign: 'center',
     lineHeight: 64,
+    textShadowColor: 'rgba(255,196,107,0.35)',
+    textShadowRadius: 18,
+    textShadowOffset: { width: 0, height: 0 },
   },
   subtitle: { color: palette.textDim, fontSize: 12, letterSpacing: 3, marginTop: 18 },
   menuBottom: { alignItems: 'center', gap: 22 },
   tapToStart: { color: palette.accent, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase' },
   menuStats: { flexDirection: 'row', gap: 42 },
+  statCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 26,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.hairline,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    backgroundColor: 'rgba(232,236,244,0.03)',
+  },
+  statDivider: { width: StyleSheet.hairlineWidth, height: 30, backgroundColor: palette.hairline },
   link: { color: palette.textDim, fontSize: 12, letterSpacing: 2, textDecorationLine: 'underline' },
+  linkRow: { flexDirection: 'row', gap: 34 },
   heading: { color: palette.text, fontSize: 24, fontWeight: '200', letterSpacing: 8, marginBottom: 10 },
   deathCause: { color: palette.textDim, fontSize: 13, marginBottom: 18, textAlign: 'center' },
   newBest: { color: palette.accent, fontSize: 12, letterSpacing: 4, textTransform: 'uppercase' },
   finalScore: { color: palette.text, fontSize: 64, fontWeight: '100', fontVariant: ['tabular-nums'] },
-  settings: { marginTop: 34, width: 240, gap: 4 },
+  settingsScroll: { marginTop: 26, maxHeight: 320, flexGrow: 0 },
+  settings: { width: 250, gap: 4, paddingBottom: 8 },
+  settingsGroup: {
+    color: palette.textDim,
+    fontSize: 11,
+    letterSpacing: 3,
+    marginTop: 18,
+    marginBottom: 4,
+  },
+  settingLabelBox: { flex: 1, paddingRight: 12 },
+  settingHint: { color: palette.textDim, fontSize: 10, marginTop: 1 },
   settingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   settingLabel: { color: palette.textDim, fontSize: 13, letterSpacing: 2 },
   walletText: { color: palette.accent, fontSize: 16, marginBottom: 14, fontVariant: ['tabular-nums'] },
   shopList: { gap: 18, paddingHorizontal: 26, paddingBottom: 20, width: '100%' },
-  shopRow: { flexDirection: 'row', alignItems: 'center', gap: 14, width: '100%' },
+  shopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    width: '100%',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.hairline,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(232,236,244,0.03)',
+  },
+  shopGlyph: { color: palette.accent, fontSize: 20, width: 28, textAlign: 'center' },
   shopInfo: { flex: 1 },
   shopName: { color: palette.text, fontSize: 15, letterSpacing: 1 },
   shopDesc: { color: palette.textDim, fontSize: 11, marginTop: 3, lineHeight: 15 },

@@ -8,7 +8,9 @@
  *      ├─ MenuOverlay  (menu)
  *      ├─ PauseOverlay (paused)
  *      ├─ GameOverOverlay (gameOver)
- *      └─ UpgradesOverlay (shop, above everything)
+ *      ├─ UpgradesOverlay (shop)
+ *      └─ CustomizeOverlay (cosmetics)
+ *      (all overlays inside an ErrorBoundary — a UI crash never kills the game)
  *
  * Boot: keep the native splash up until saved progress + audio are ready,
  * then fade it away — the first thing the player sees is the live starfield.
@@ -22,13 +24,17 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { audioManager } from './src/audio/audioManager';
+import { applyCrashReportPreference } from './src/observability/sentry';
+import { loadSprites } from './src/render/imageAssets';
 import { palette } from './src/config/palette';
 import { gameActions, gameStore } from './src/state/gameStore';
-import { progressActions } from './src/state/progressStore';
+import { progressActions, progressStore } from './src/state/progressStore';
 import { useStore } from './src/state/store';
 import { GameCanvas, type GameCanvasHandle } from './src/render/GameCanvas';
 import { Hud } from './src/ui/Hud';
 import { GameOverOverlay, MenuOverlay, PauseOverlay, UpgradesOverlay } from './src/ui/overlays';
+import { CustomizeOverlay } from './src/ui/CustomizeOverlay';
+import { UiErrorBoundary as ErrorBoundary } from './src/ui/ErrorBoundary';
 
 // Hold the splash until we're truly ready — no intermediate loading screen.
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -40,12 +46,15 @@ export default function App(): React.JSX.Element {
 
   const phase = useStore(gameStore, (s) => s.phase);
   const shopOpen = useStore(gameStore, (s) => s.shopOpen);
+  const customizeOpen = useStore(gameStore, (s) => s.customizeOpen);
 
   // ------------------------------------------------------------------- boot
   useEffect(() => {
     let mounted = true;
     void (async () => {
       await progressActions.init();
+      applyCrashReportPreference(progressStore.get().features.crashReports);
+      void loadSprites(); // decode any registered skin art; never blocks boot
       await audioManager.init();
       if (!mounted) return;
       setBooted(true);
@@ -90,17 +99,21 @@ export default function App(): React.JSX.Element {
           <StatusBar style="light" hidden={phase === 'playing'} />
           <GameCanvas handleRef={canvasRef} />
           {booted && (
-            <>
+            <ErrorBoundary>
               <Hud visible={phase === 'playing'} getHud={engineHud} />
-              <MenuOverlay visible={phase === 'menu' && !shopOpen} onStart={startRun} />
+              <MenuOverlay
+                visible={phase === 'menu' && !shopOpen && !customizeOpen}
+                onStart={startRun}
+              />
               <PauseOverlay visible={phase === 'paused'} onQuit={quitToMenu} />
               <GameOverOverlay
-                visible={phase === 'gameOver' && !shopOpen}
+                visible={phase === 'gameOver' && !shopOpen && !customizeOpen}
                 onRetry={startRun}
                 onMenu={quitToMenu}
               />
               <UpgradesOverlay visible={shopOpen} />
-            </>
+              <CustomizeOverlay visible={customizeOpen} />
+            </ErrorBoundary>
           )}
         </View>
       </SafeAreaProvider>

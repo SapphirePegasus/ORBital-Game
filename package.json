@@ -1,6 +1,6 @@
 {
-  "name": "space-hopper",
-  "version": "1.0.0",
+  "name": "orbital",
+  "version": "1.2.0",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -14,9 +14,12 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@sentry/react-native": "8.17.2",
     "@shopify/react-native-skia": "2.6.2",
     "expo": "56.0.14",
+    "expo-asset": "56.0.18",
     "expo-audio": "56.0.12",
+    "expo-dev-client": "56.0.22",
     "expo-haptics": "56.0.3",
     "expo-splash-screen": "56.0.12",
     "expo-status-bar": "56.0.4",

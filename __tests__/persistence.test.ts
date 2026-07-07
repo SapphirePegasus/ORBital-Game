@@ -64,9 +64,13 @@ describe('persistence', () => {
   });
 
   test('corrupted storage degrades to defaults instead of crashing', async () => {
+    // The dev-mode warning is the expected behavior under test — keep CI output clean.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     await AsyncStorage.setItem('space-hopper/progress', '{not json!!');
     const loaded = await loadProgress();
     expect(loaded).toEqual(defaultProgress);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   test('tampered payloads are still sanitized on load', async () => {

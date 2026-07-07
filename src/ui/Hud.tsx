@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { gameConfig } from '../config/gameConfig';
 import { palette } from '../config/palette';
 import type { HudInfo } from '../engine/engine';
-import { gameActions, gameStore } from '../state/gameStore';
+import { gameActions, gameStore, type TutorialHint } from '../state/gameStore';
 import { useStore } from '../state/store';
 import { StatChip } from './components';
 
@@ -29,10 +29,17 @@ const kindLabels: Record<string, string> = {
   '—': '—',
 };
 
+const hintText: Record<Exclude<TutorialHint, null>, string> = {
+  hold: 'hold anywhere to charge your launch',
+  release: 'release to fly — watch the dotted path',
+  steer: 'hold left / right side to steer',
+};
+
 export const Hud: React.FC<Props> = ({ visible, getHud }) => {
   const insets = useSafeAreaInsets();
   const score = useStore(gameStore, (s) => s.score);
   const runCoins = useStore(gameStore, (s) => s.runCoins);
+  const hint = useStore(gameStore, (s) => s.hint);
   const [hud, setHud] = useState<HudInfo | null>(null);
 
   useEffect(() => {
@@ -66,6 +73,7 @@ export const Hud: React.FC<Props> = ({ visible, getHud }) => {
       </View>
 
       <View style={[styles.bottom, { paddingBottom: insets.bottom + 14 }]} pointerEvents="none">
+        {hint !== null && <Text style={styles.hint}>{hintText[hint]}</Text>}
         {charge > 0 && (
           <View style={styles.chargeTrack}>
             <View style={[styles.chargeFill, { width: `${Math.round(charge * 100)}%` }]} />
@@ -85,7 +93,6 @@ export const Hud: React.FC<Props> = ({ visible, getHud }) => {
         <Text style={styles.bodyKind}>
           {kindLabels[hud?.bodyKind ?? '—'] ?? '—'}
           {(hud?.shields ?? 0) > 0 ? `   ⬡ ${hud?.shields}` : ''}
-          {(hud?.boostsLeft ?? 0) > 0 ? `   ▲ ${hud?.boostsLeft}` : ''}
         </Text>
       </View>
     </View>
@@ -124,6 +131,13 @@ const styles = StyleSheet.create({
   },
   chargeFill: { height: '100%', backgroundColor: palette.accent },
   decayText: { color: palette.textDim, fontSize: 11, letterSpacing: 2 },
+  hint: {
+    color: palette.accent,
+    fontSize: 13,
+    letterSpacing: 1.5,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
   decayWarn: { color: palette.danger },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
   bodyKind: { color: palette.textDim, fontSize: 11, letterSpacing: 3, textTransform: 'uppercase' },

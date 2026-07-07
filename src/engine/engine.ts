@@ -40,7 +40,6 @@ export interface HudInfo {
   chargeT: number;
   /** 1 → full stable time left, 0 → decaying now. */
   decayRemaining: number;
-  boostsLeft: number;
   shields: number;
   mode: RocketState['mode'];
 }
@@ -98,7 +97,7 @@ export class GameEngine {
       chargeSpeed: gameConfig.launch.minSpeed,
       chargeT: 0,
       flightTime: 0,
-      boostsLeft: gameConfig.rocket.baseBoosts + this.upgrades.boosters,
+      steer: 0,
       shields: gameConfig.rocket.baseShields + this.upgrades.shield,
     };
   }
@@ -127,7 +126,7 @@ export class GameEngine {
 
   // ------------------------------------------------------------------ input
 
-  /** Finger down: start charging (orbiting) or fire a boost (flying). */
+  /** Finger down while parked: start charging the launch. */
   press(): void {
     if (this.attract || !this.alive) return;
     const r = this.rocket;
@@ -135,16 +134,23 @@ export class GameEngine {
       r.mode = 'charging';
       r.chargeT = 0;
       r.chargeSpeed = gameConfig.launch.minSpeed;
-    } else if (r.mode === 'flying' && r.boostsLeft > 0) {
-      const speed = Math.hypot(r.vx, r.vy);
-      if (speed > 1e-3) {
-        const k = gameConfig.flight.boostImpulse / speed;
-        r.vx += r.vx * k;
-        r.vy += r.vy * k;
-        r.boostsLeft--;
-        this.emit({ type: 'boost' });
-      }
     }
+  }
+
+  /**
+   * Mid-flight steering input: -1 = curve left, 1 = curve right (relative to
+   * the direction of travel), 0 = coast. Only honored while flying — parked
+   * orbits are untouched by design. Emits a `steer` event on engagement.
+   */
+  setSteer(dir: -1 | 0 | 1): void {
+    if (this.attract || !this.alive) return;
+    const r = this.rocket;
+    if (r.mode !== 'flying') {
+      r.steer = 0;
+      return;
+    }
+    if (dir !== 0 && r.steer === 0) this.emit({ type: 'steer' });
+    r.steer = dir;
   }
 
   /** Finger up: launch if charging. */
@@ -155,6 +161,7 @@ export class GameEngine {
     const body = this.world.byId(r.bodyId);
     r.mode = 'flying';
     r.flightTime = 0;
+    r.steer = 0;
     // Tangential launch, preserving orbital direction.
     const tx = -Math.sin(r.orbitAngle) * r.orbitDir;
     const ty = Math.cos(r.orbitAngle) * r.orbitDir;
@@ -254,6 +261,22 @@ export class GameEngine {
 
   private stepFlight(r: RocketState, dt: number): void {
     r.flightTime += dt;
+
+    // Steering thrusters: lateral acceleration perpendicular to velocity.
+    // perp = (-vy, vx)/|v| points screen-right when travelling screen-up.
+    if (r.steer !== 0) {
+      const vx = r.vx;
+      const vy = r.vy;
+      const speed = Math.hypot(vx, vy);
+      if (speed > 1e-3) {
+        const turn =
+          gameConfig.steering.baseTurnAccel *
+          (1 + gameConfig.steering.turnAccelPerLevel * this.upgrades.boosters);
+        r.vx += ((-vy / speed) * turn * r.steer) * dt;
+        r.vy += ((vx / speed) * turn * r.steer) * dt;
+      }
+    }
+
     stepIntegration(r, this.world.bodies, dt);
     const speed = Math.hypot(r.vx, r.vy);
     if (speed > this.bestSpeed) this.bestSpeed = speed;
@@ -300,7 +323,7 @@ export class GameEngine {
     r.orbitTime = 0;
     r.vx = 0;
     r.vy = 0;
-    r.boostsLeft = gameConfig.rocket.baseBoosts + this.upgrades.boosters;
+    r.steer = 0;
 
     const firstVisit = body.depth >= this.bodiesVisited;
     let coins = 0;
@@ -348,7 +371,7 @@ export class GameEngine {
       if (dx * dx + dy * dy < radius * radius) {
         c.collected = true;
         this.coinsCollected += gameConfig.coins.orbitCoinValue;
-        this.emit({ type: 'coin' });
+        this.emit({ type: 'coin', x: c.x, y: c.y });
       }
     }
   }
@@ -493,7 +516,6 @@ export class GameEngine {
       escapeVelocity: body ? escapeVelocity(body, r.orbitRadius) : 0,
       chargeT: r.mode === 'charging' ? r.chargeT : 0,
       decayRemaining,
-      boostsLeft: r.boostsLeft,
       shields: r.shields,
       mode: r.mode,
     };
